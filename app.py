@@ -62,6 +62,14 @@ def api_precios():
         return jsonify(datos)
     else:
         return jsonify({'error': 'No se pudieron obtener los datos'}), 500
+    
+
+# Endpoint para la raíz "/"
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "message": "Bienvenido a la API de precios. Consulta /api/precios para obtener los datos."
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))  
