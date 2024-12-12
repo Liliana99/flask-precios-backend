@@ -1,77 +1,76 @@
-from flask import Flask, jsonify
 import requests
-from bs4 import BeautifulSoup
-import os
+from datetime import datetime
 
-app = Flask(__name__)
+# Configuración
+url = 'https://api.esios.ree.es/indicators/1001'
+headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'x-api-key': 'd0217f0ebe4f45736f4bc1b4a14e46ab92d3bcd8e77336dfe0b428caec944368'
+}
 
-# Función para realizar scraping
-def obtener_precios():
-    try:
+# GeoID para Península
+geo_id = 8741
 
-        url = 'https://preciosdelaluz.es/'
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        respuesta = requests.get(url, headers=headers)
-        if respuesta.status_code == 200:
-            sopa = BeautifulSoup(respuesta.text, 'html.parser')
-            resumen = sopa.find('div', class_='bloqueresumen')
+# Hacer la petición
+response = requests.get(url, headers=headers)
 
-            if not resumen:
-                return {'error': 'No se pudo encontrar el resumen'}
+if response.status_code == 200:
+    # Convertir la respuesta a JSON
+    json_data = response.json()
+    valores = json_data.get('indicator', {}).get('values', [])
 
-            # Extraer precios
-            precio_minimo = resumen.find('div', class_='preciomin').find('span').text.strip()
-            precio_medio = resumen.find('div', class_='preciomed').find('span').text.strip()
-            precio_maximo = resumen.find('div', class_='preciomax').find('span').text.strip()
+    # Filtrar por GeoID
+    valores_filtrados = [v for v in valores if v['geo_id'] == geo_id]
 
-            # Estructura para devolver los precios mínimos, medios y máximos
-            resumen_precios = {
-                'precio_minimo': f"{precio_minimo} €/kWh",
-                'precio_medio': f"{precio_medio} €/kWh",
-                'precio_maximo': f"{precio_maximo} €/kWh",
-            }
+    # Convertir precios y clasificar por franjas horarias
+    precios_por_hora = []
+    precios = []
+    for valor in valores_filtrados:
+        hora = datetime.fromisoformat(valor['datetime']).strftime('%H:%M')
+        precio_eur_kwh = valor['value'] / 1000  # Convertir de €/MWh a €/kWh
+        precios.append(precio_eur_kwh)
 
-            # Extraer precios horarios
-        bloques = sopa.select('div.precitem')  # Selector para los elementos por hora
-        precios_horarios = []
+        # Clasificación por franjas horarias
+        hora_actual = int(hora.split(':')[0])
+        if 0 <= hora_actual < 8:
+            franja = "Valle"
+        elif 8 <= hora_actual < 10 or 14 <= hora_actual < 18 or 22 <= hora_actual < 24:
+            franja = "Llano"
+        else:
+            franja = "Punta"
 
-        for bloque in bloques:
-            hora = bloque.find('span', class_='hora').text.strip()  # Extraer hora
-            precio = bloque.find('span', class_='euritos').text.strip()  # Extraer precio
-            precios_horarios.append({'hora': hora, 'precio': f"{precio} €/kWh"})
+        precios_por_hora.append({
+            "hora": hora,
+            "precio": round(precio_eur_kwh, 3),
+            "franja": franja
+        })
 
-        # Combinar todos los resultados
-        return {
-            'resumen_precios': resumen_precios,
-            'precios_horarios': precios_horarios
-        }
-        
+    # Calcular estadísticas generales
+    precio_minimo = round(min(precios), 3)
+    precio_maximo = round(max(precios), 3)
+    precio_medio = round(sum(precios) / len(precios), 3)
 
-   
-    except Exception as e:
-        print(f"Error en obtener_precios: {e}")
-        return {'error': 'Error interno en el servidor'}
+    # Resultado final
+    resultado = {
+        "resumen_precios": {
+            "precio_minimo": precio_minimo,
+            "precio_maximo": precio_maximo,
+            "precio_medio": precio_medio
+        },
+        "precios_por_hora": precios_por_hora
+    }
 
-# Endpoint que expone los datos
-@app.route('/api/precios', methods=['GET'])
-def api_precios():
-    datos = obtener_precios()
-    if datos and 'error' not in datos:
-        return jsonify(datos)
-    else:
-        return jsonify({'error': 'No se pudieron obtener los datos'}), 500
-    
+    # Mostrar el resultado
+    print("\nResumen de Precios:")
+    print(f"Precio Mínimo: {precio_minimo} €/kWh")
+    print(f"Precio Máximo: {precio_maximo} €/kWh")
+    print(f"Precio Medio: {precio_medio} €/kWh\n")
 
-# Endpoint para la raíz "/"
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        "message": "Bienvenido a la API de precios. Consulta /api/precios para obtener los datos."
-    })
+    print("Precios por Hora:")
+    for precio in precios_por_hora:
+        print(f"Hora: {precio['hora']} - Precio: {precio['precio']} €/kWh - Franja: {precio['franja']}")
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  
-    app.run(debug=True, host='0.0.0.0', port=port)
+else:
+    print(f"Error al obtener datos: {response.status_code}")
 
